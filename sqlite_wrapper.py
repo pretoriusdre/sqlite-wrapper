@@ -357,7 +357,7 @@ class SQLiteWrapper:
             raise e
 
     @classmethod
-    def _get_uuid7(cls):
+    def _get_uuid7(cls, unix_ts_ms=None, ver=None, rand_a=None, var=None, rand_b=None):
 
         """A lightweight UUID7 implementation based on the draft UUIDv7 standard, retrieved 20 July 2024
         
@@ -380,21 +380,21 @@ class SQLiteWrapper:
         """
         
         # The current Unix timestamp in milliseconds
-        unix_ts_ms = time.time_ns() // 1000000
+        if not unix_ts_ms:
+            unix_ts_ms = time.time_ns() // 1000000
         
         # Random data
-        rand_a = int.from_bytes(os.urandom(2), byteorder='big') # 2 bytes = 16 bits
-        rand_b = int.from_bytes(os.urandom(8), byteorder='big') # 8 bytes = 64 bits
+        if not rand_a:
+            rand_a = int.from_bytes(os.urandom(2), byteorder='big') # 2 bytes = 16 bits
+        if not rand_b:
+            rand_b = int.from_bytes(os.urandom(8), byteorder='big') # 8 bytes = 64 bits
         
         # Fixed parameters for UUIDv7
-        ver = 0b0111 # Decimal value = 7. Hex value = 0x7
-        var = 0b10  # Decimal value = 2.
+        if not ver:
+            ver = 0b0111 # Decimal value = 7. Hex value = 0x7
+        if not var:
+            var= 0b10  # Decimal value = 2.
 
-        return cls._uuid7_from_parts(unix_ts_ms, ver, rand_a, var, rand_b)
-
-    @classmethod
-    def _uuid7_from_parts(cls, unix_ts_ms, ver, rand_a, var, rand_b):
-        
         # Mask inputs
         unix_ts_ms &= 0xFFFFFFFFFFFF  # 48 bits
         ver &= 0xF  # 4 bits
@@ -420,11 +420,10 @@ class SQLiteWrapper:
             'var':0b10,
             'rand_b': 0x18C4DC0C0C07398F
         }
-        test_vector_expected_output = '017F22E2-79B0-7CC3-98C4-DC0C0C07398F'.lower()
-        is_compliant = cls._uuid7_from_parts(**test_vector) == test_vector_expected_output
-        
-
+        expected_output = '017F22E2-79B0-7CC3-98C4-DC0C0C07398F'.lower()
+        is_compliant = cls._get_uuid7(**test_vector) == expected_output
         return is_compliant
+
 
 assert SQLiteWrapper._test_uuid()
 
