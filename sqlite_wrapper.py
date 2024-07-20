@@ -133,7 +133,7 @@ class SQLiteWrapper:
 
         if auto_add_id:
             df = df.copy()
-            uuid_col = [self._get_uuid7() for _ in range(len(df))]
+            uuid_col = [self.__class__._get_uuid7() for _ in range(len(df))]
             df.insert(0, 'id',  uuid_col)
 
         if if_exists == 'upsert':
@@ -356,40 +356,75 @@ class SQLiteWrapper:
         if raise_it:
             raise e
 
+    @classmethod
+    def _get_uuid7(cls):
 
-    def _get_uuid7(self):
-        """
-        Generates a UUID7-compliant string.
+        """A lightweight UUID7 implementation based on the draft UUIDv7 standard, retrieved 20 July 2024
         
-        The leading 48 bits are the timestamp in milliseconds from Unix epoch, so the values will increase monotonically over time
-        
-        Returns:
-            str: A UUID7-compliant string.
+        Refer to RFC 9562 at https://www.rfc-editor.org/rfc/rfc9562
+
+        Bit allocation:
+        0               1  <- Octets -> 2               3               4
+        0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+        |                           unix_ts_ms                          |  <- Octets 0,1,2,3
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+        |          unix_ts_ms           |  ver  |       rand_a          |  <- Octets 4,5,6,7
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+        |var|                        rand_b                             |  <- Octets 8,9,10,11
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+        |                            rand_b                             |  <- Octets 12,13,14,15
+        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+                                            Grand total = 16 octets x 8 bits/octet = 128 bits
         """
+        
+        # The current Unix timestamp in milliseconds
+        unix_ts_ms = time.time_ns() // 1000000
+        
+        # Random data
+        rand_a = int.from_bytes(os.urandom(2), byteorder='big') # 2 bytes = 16 bits
+        rand_b = int.from_bytes(os.urandom(8), byteorder='big') # 8 bytes = 64 bits
+        
+        # Fixed parameters for UUIDv7
+        ver = 0b0111 # Decimal value = 7. Hex value = 0x7
+        var = 0b10  # Decimal value = 2.
 
-        # This function written based on code by nickhobbs94 in an open pull request on the uuid7 repository by stevesimmons
-        # https://github.com/stevesimmons/uuid7/pull/2
-        # The uuid7 library was not used as it is seems to be unmaintained and not matching the current draft due to use of ns time resolution.
+        return cls._uuid7_from_parts(unix_ts_ms, ver, rand_a, var, rand_b)
 
+    @classmethod
+    def _uuid7_from_parts(cls, unix_ts_ms, ver, rand_a, var, rand_b):
+        
+        # Mask inputs
+        unix_ts_ms &= 0xFFFFFFFFFFFF  # 48 bits
+        ver &= 0xF  # 4 bits
+        rand_a &= 0xFFF  # 12 bits
+        var &= 0x3  # 2 bits
+        rand_b &= 0x3FFFFFFFFFFFFFFF  # 62 bits
 
-        ms = time.time_ns() // 1000000
-        rand_a = int.from_bytes(os.urandom(2), byteorder='big')
-        rand_b = int.from_bytes(os.urandom(8), byteorder='big')
-        version = 0x07
-        var = 2
-        rand_a &= 0xfff
-        rand_b &= 0x3fffffffffffffff
-        uuid_bytes = ms.to_bytes(6, byteorder='big')
-        uuid_bytes += ((version<<12)+rand_a).to_bytes(2, byteorder='big')
-        uuid_bytes += ((var<<62)+rand_b).to_bytes(8, byteorder='big')
+        uuid_bytes = unix_ts_ms.to_bytes(6, byteorder='big') # 6 bytes = 48 bits
+        uuid_bytes += ((ver << 12) + rand_a).to_bytes(2, byteorder='big') # Total 2 bytes (16 bits). The 4 bit of ver is shifted by 12 to start.
+        uuid_bytes += ((var << 62) + rand_b).to_bytes(8, byteorder='big') # Total 8 bytes (64 bits). The 2 bits of var is shifted by 62 to start.
+
         return f"{uuid_bytes[:4].hex()}-{uuid_bytes[4:6].hex()}-{uuid_bytes[6:8].hex()}-{uuid_bytes[8:10].hex()}-{uuid_bytes[10:].hex()}"
+    
+    @classmethod
+    def _test_uuid(cls): 
+        """This function is used to validate the test vector provided in the RFC documentation
+        https://www.ietf.org/rfc/rfc9562.html#name-example-of-a-uuidv7-value
+        """
+        test_vector = {
+            'unix_ts_ms':0x017F22E279B0,
+            'ver':0x7,
+            'rand_a':0xCC3,
+            'var':0b10,
+            'rand_b': 0x18C4DC0C0C07398F
+        }
+        test_vector_expected_output = '017F22E2-79B0-7CC3-98C4-DC0C0C07398F'.lower()
+        is_compliant = cls._uuid7_from_parts(**test_vector) == test_vector_expected_output
+        
 
+        return is_compliant
 
+assert SQLiteWrapper._test_uuid()
 
-
-
-
-
-if __name__ == "__main__":
-    # Example usage: See example.ipynb
-    pass
