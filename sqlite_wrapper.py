@@ -175,20 +175,20 @@ class SQLiteWrapper:
 
         elif if_exists == 'replace':
             # Pandas replace method will remove any DDL, so this is used to retain it.
-            try:
-                table_create_sql = self.get_table_ddl(table_name)
-                table_drop_sql = f"DROP TABLE [{table_name}]"
-                self._execute(table_drop_sql)
-                self._execute(table_create_sql)
-            except Exception:
-                pass # Table does not exist and will be created.
-
-            # Table was already deleted and recreated using correct DDL. Now just append.
+            if self.table_exists(table_name):
+                try:
+                    table_delete_sql = f"DELETE FROM [{table_name}]"
+                    self._execute(table_delete_sql)
+                except Exception as e:
+                    print(f"Error deleting the data already saved to table '{table_name}', likely due to a foreign key constraint.")
+                    self._handle_exception(e)
+        
+            # Table was cleared, retaining its original DDL and contraints. Now use append to add the new data.
             try:
                 with sqlite3.connect(self.db_path) as conn:
                     df.to_sql(table_name, conn, if_exists='append', index=False)
             except Exception:
-                # Incompatible schema. Fall back to replace
+                # Incompatible schema. Fall back to replace. This will replace the table.
                 with sqlite3.connect(self.db_path) as conn:
                     df.to_sql(table_name, conn, if_exists='replace', index=False)
                 
@@ -286,7 +286,7 @@ class SQLiteWrapper:
             raise ValueError(f"Table '{table_name}' does not exist.")
 
 
-    def delete_table(self, table_name):
+    def drop_table(self, table_name):
         """
         Deletes a specified table from the database.
 
@@ -314,7 +314,7 @@ class SQLiteWrapper:
         if confirmation == 'DELETE':
             tables = self.get_all_table_names()
             for table_name in tables:
-                self.delete_table(table_name)
+                self.drop_table(table_name)
 
             print("Database wiped successfully.")
         else:
@@ -357,7 +357,7 @@ class SQLiteWrapper:
             raise e
 
     @classmethod
-    def _get_uuid7(cls, unix_ts_ms=None, ver=None, rand_a=None, var=None, rand_b=None):
+    def _get_uuid7(cls, unix_ts_ms=None, rand_a=None, rand_b=None):
 
         """A lightweight UUID7 implementation based on the draft UUIDv7 standard, retrieved 20 July 2024
         
@@ -377,6 +377,10 @@ class SQLiteWrapper:
         +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
                                             Grand total = 16 octets x 8 bits/octet = 128 bits
+        
+        Note: The UUID7 implementation currently available on PyPi is not correct as it is using nanosecond time resolution.
+        https://pypi.org/project/uuid7/
+        https://github.com/stevesimmons/uuid7/issues/1
         """
         
         # The current Unix timestamp in milliseconds
@@ -385,26 +389,24 @@ class SQLiteWrapper:
         
         # Random data
         if not rand_a:
-            rand_a = int.from_bytes(os.urandom(2), byteorder='big') # 2 bytes = 16 bits
+            rand_a = int.from_bytes(os.urandom(2), byteorder='big') # 2 bytes = 16 bits of random data
         if not rand_b:
-            rand_b = int.from_bytes(os.urandom(8), byteorder='big') # 8 bytes = 64 bits
+            rand_b = int.from_bytes(os.urandom(8), byteorder='big') # 8 bytes = 64 bits of random data
         
         # Fixed parameters for UUIDv7
-        if not ver:
-            ver = 0b0111 # Decimal value = 7. Hex value = 0x7
-        if not var:
-            var= 0b10  # Decimal value = 2.
+        ver = 7 # Binary value: 0b0111
+        var = 2 # Binary value: 0b10
 
-        # Mask inputs
+        # Mask all inputs with zeroes to ensure they are sufficiently long.
         unix_ts_ms &= 0xFFFFFFFFFFFF  # 48 bits
         ver &= 0xF  # 4 bits
         rand_a &= 0xFFF  # 12 bits
         var &= 0x3  # 2 bits
-        rand_b &= 0x3FFFFFFFFFFFFFFF  # 62 bits
+        rand_b &= 0x3FFFFFFFFFFFFFFF # 62 bits
 
         uuid_bytes = unix_ts_ms.to_bytes(6, byteorder='big') # 6 bytes = 48 bits
-        uuid_bytes += ((ver << 12) + rand_a).to_bytes(2, byteorder='big') # Total 2 bytes (16 bits). The 4 bit of ver is shifted by 12 to start.
-        uuid_bytes += ((var << 62) + rand_b).to_bytes(8, byteorder='big') # Total 8 bytes (64 bits). The 2 bits of var is shifted by 62 to start.
+        uuid_bytes += ((ver << 12) + rand_a).to_bytes(2, byteorder='big') # Total 2 bytes (16 bits). The 4 bit of ver is shifted by 12 bits to the start.
+        uuid_bytes += ((var << 62) + rand_b).to_bytes(8, byteorder='big') # Total 8 bytes (64 bits). The 2 bits of var is shifted by 62 bits to the start.
 
         return f"{uuid_bytes[:4].hex()}-{uuid_bytes[4:6].hex()}-{uuid_bytes[6:8].hex()}-{uuid_bytes[8:10].hex()}-{uuid_bytes[10:].hex()}"
     
@@ -415,9 +417,7 @@ class SQLiteWrapper:
         """
         test_vector = {
             'unix_ts_ms':0x017F22E279B0,
-            'ver':0x7,
             'rand_a':0xCC3,
-            'var':0b10,
             'rand_b': 0x18C4DC0C0C07398F
         }
         expected_output = '017F22E2-79B0-7CC3-98C4-DC0C0C07398F'.lower()
