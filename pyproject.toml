@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "sqlite-wrapper"
+version = "0.1.0"
+description = "A wrapper for sqlite which implements features such as dataframe upsert, uuid7 keys etc"
+authors = ["Andre Pretorius <pretorius.dre@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+pandas = "^2.2.2"
+ipykernel = "^6.29.5"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
