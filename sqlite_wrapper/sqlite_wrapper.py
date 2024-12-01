@@ -167,6 +167,7 @@ class SQLiteWrapper:
                 converted_tuple = tuple(
                     int(x) if isinstance(x, np.integer) else
                     float(x) if isinstance(x, np.floating) else
+                    int(x) if isinstance(x, np.bool) else
                     x for x in t
                     )
                 return converted_tuple
